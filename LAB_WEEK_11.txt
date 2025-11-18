@@ -1,0 +1,29 @@
+Yoga Wyas Pramudita
+00000109408
+1) Ketika pengguna mengambil gambar, bagian kode yang menangani penyimpanan gambar ke path berdasarkan URI adalah fungsi insertToStore pada ProviderFileManager. Berikut potongan kodenya (persis seperti pada modul):
+
+  takePictureLauncher =
+            registerForActivityResult(ActivityResultContracts.TakePicture()) {
+                providerFileManager.insertImageToStore(photoInfo)
+            }
+
+2) Pada FileInfo.kt terdapat 5 atribut:
+   - Atribut pertama (uri: Uri) merujuk ke URI yang mengacu pada file sementara (temporary) yang dibuat melalui FileProvider agar kamera (activity eksternal) dapat menulis langsung ke file aplikasi. URI ini bersifat temporary dan digunakan sebagai lokasi sumber (input stream) saat menyalin file ke MediaStore.
+   - Atribut keempat (relativePath: String) merujuk ke path relatif pada penyimpanan eksternal (Relative Path) di mana file akan disimpan ketika dimasukkan ke MediaStore (mis. Environment.DIRECTORY_PICTURES atau Environment.DIRECTORY_MOVIES). Untuk Android Q ke atas, relativePath menentukan folder tujuan di MediaStore sehingga file tersimpan di lokasi yang dapat diakses galeri.
+
+3) Urutan kronologis dari mengambil gambar sampai file tersimpan di MediaStore:
+   a. Pengguna menekan tombol "Photo" di aplikasi.
+   b. Aplikasi memeriksa izin penyimpanan (untuk Android < Q) lewat checkStoragePermission; jika belum, meminta izin.
+   c. ProviderFileManager.generatePhotoUri(...) dipanggil untuk membuat FileInfo:
+       - Membuat nama file (mis. "img_<time>.jpg").
+       - Membuat objek File di folder aplikasi (getExternalFilesDir(Environment.DIRECTORY_PICTURES)).
+       - Menghasilkan URI file via FileProvider.getUriForFile(...) — URI ini dipakai untuk memberi akses sementara kepada aplikasi kamera.
+   d. takePictureLauncher.launch(photoInfo?.uri) dipanggil; ini membuka kamera (intent) dan memberi tahu kamera untuk menyimpan hasil ke URI yang diberikan (FileProvider URI).
+   e. Kamera mengambil foto dan menulis hasil ke URI (file aplikasi) yang diberikan.
+   f. Saat activity camera selesai, callback takePictureLauncher menerima hasil; kode kemudian memanggil providerFileManager.insertImageToStore(photoInfo).
+   g. insertImageToStore memanggil insertToStore yang menjalankan pekerjaan di executor background:
+       - Memanggil contentResolver.insert(contentUri, contentValues) untuk membuat entri baru di MediaStore (menghasilkan insertedUri).
+       - Membuka InputStream dari file sumber (contentResolver.openInputStream(fileInfo.uri)) — membaca file yang ditulis kamera.
+       - Membuka OutputStream dari insertedUri (contentResolver.openOutputStream(insertedUri)) — menulis data ke lokasi MediaStore.
+       - Menyalin isi dari input ke output menggunakan IOUtils.copy.
+   h. Setelah copy selesai, file salinan berada di MediaStore (dengan relativePath jika Android Q+), sehingga aplikasi Galeri dan aplikasi lain dapat mengaksesnya.
